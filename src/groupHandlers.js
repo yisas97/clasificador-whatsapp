@@ -110,6 +110,51 @@ class WhatsAppGroupHandler {
     await this.waitForConnection();
     try {
       const groups = await this.sock.groupFetchAllParticipating();
+      console.log(groups);
+
+      const gruposDetallados = await Promise.all(
+        Object.entries(groups).map(async ([id, group]) => {
+          let imageUrl = null;
+          try {
+            // Intentar obtener la imagen del grupo
+            const ppUrl = await this.sock.profilePictureUrl(id, "image");
+            imageUrl = ppUrl;
+          } catch (error) {
+            console.log(
+              `No se pudo obtener la imagen para el grupo ${group.subject}:`,
+              error
+            );
+            // Si no hay imagen, usar null
+            imageUrl = null;
+          }
+
+          let inviteCode = null;
+          try {
+            // Intentar obtener el código de invitación
+            inviteCode = await this.sock.groupInviteCode(id);
+          } catch (error) {
+            console.log(
+              `No se pudo obtener el código de invitación para el grupo ${group.subject}:`,
+              error
+            );
+          }
+
+          return {
+            id,
+            nombre: group.subject,
+            participantes: group.participants.length,
+            creador: group.owner || "No disponible",
+            descripcion: group.desc || "Sin descripción",
+            imagen: imageUrl,
+            inviteCode: inviteCode,
+            creacion: group.creation || null,
+            restrict: group.restrict || false,
+            announce: group.announce || false,
+          };
+        })
+      );
+
+      /**
       return Object.entries(groups).map(([id, group]) => ({
         id,
         nombre: group.subject,
@@ -117,6 +162,9 @@ class WhatsAppGroupHandler {
         creador: group.owner || "No disponible",
         descripcion: group.desc || "Sin descripción",
       }));
+      **/
+      console.log("Grupos procesados con detalles:", gruposDetallados);
+      return gruposDetallados;
     } catch (error) {
       console.error("Error al listar grupos:", error);
       throw error;
@@ -156,9 +204,7 @@ class WhatsAppGroupHandler {
       }
     }
 
-    const fileName = `chat_export_${moment().format(
-      "YYYYMMDD_HHmmss"
-    )}.txt`;
+    const fileName = `chat_export_${moment().format("YYYYMMDD_HHmmss")}.txt`;
     fs.writeFileSync(fileName, allMessages);
 
     console.log(`Archivo creado: ${fileName} con contenido:\n`, allMessages);
