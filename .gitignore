@@ -1,0 +1,5 @@
+/node_modules
+/package-lock.json
+/session_auth_info
+baileys_store.json
+src/message_store.json

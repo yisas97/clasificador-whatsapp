@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  whatsapp-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-api
+    volumes:
+      - ./session_auth_info:/usr/src/app/session_auth_info
+      - ./store:/usr/src/app/store
+      - ./messages_store:/usr/src/app/messages_store
+      # Solo para desarrollo
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MESSAGES_LIMIT=1000
+      - MESSAGE_STORE_SIZE=1000
+      - STORE_MESSAGES=true
+      - STORE_PATH=/usr/src/app/store
+      - SESSION_DIR=/usr/src/app/session_auth_info
+      - DEBUG=baileys*
+    ports:
+      - "3000:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
