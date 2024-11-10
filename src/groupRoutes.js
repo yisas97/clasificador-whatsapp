@@ -48,13 +48,16 @@ module.exports = function (sock, store, messageStore) {
     let tempFileName = null;
 
     try {
+      const days = parseInt(req.query.days) || 30; // Parámetro nuevo para días
       const messages = await handler.getGroupMessagesAsString(
-        req.query.groupId
+        req.query.groupId,
+        days
       );
 
       console.log(
         `Total de mensajes encontrados: ${messages.split("\n").length}`
       );
+      console.log(`Período analizado: ${days} días`);
 
       tempFileName = `temp_chat_${Date.now()}.txt`;
       fs.writeFileSync(tempFileName, messages, "utf8");

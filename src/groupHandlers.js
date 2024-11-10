@@ -27,11 +27,13 @@ class WhatsAppGroupHandler {
     this.sock = sock;
     this.store = store;
     this.messageStore = this.loadMessageStore(messageStore);
+    this.MAX_MESSAGES_PER_CHAT = 2000; // Configurable: máximo número de mensajes por chat
+    this.RETENTION_DAYS = 60; // Configurable: días de retención
 
-    // Configurar guardado automático cada 5 minutos
+    // Configurar limpieza automática cada 6 horas en lugar de cada 5 minutos
     this.autoSaveInterval = setInterval(() => {
-      this.saveMessageStore();
-    }, 5 * 60 * 1000);
+      this.cleanAndSaveMessageStore();
+    }, 6 * 60 * 60 * 1000);
 
     // Guardar mensajes antes de cerrar el programa
     process.on("SIGINT", () => {
@@ -39,6 +41,39 @@ class WhatsAppGroupHandler {
       clearInterval(this.autoSaveInterval);
       process.exit();
     });
+  }
+
+  cleanAndSaveMessageStore() {
+    try {
+      const retentionTime = moment()
+        .subtract(this.RETENTION_DAYS, "days")
+        .unix();
+
+      // Limpiar mensajes antiguos
+      Object.keys(this.messageStore).forEach((chatId) => {
+        const messages = this.messageStore[chatId];
+
+        // Filtrar mensajes dentro del período de retención
+        const filteredMessages = messages.filter(
+          (msg) => (msg.messageTimestamp || 0) >= retentionTime
+        );
+
+        if (filteredMessages.length !== messages.length) {
+          console.log(
+            `Limpiando chat ${chatId}: ${
+              messages.length - filteredMessages.length
+            } mensajes antiguos eliminados`
+          );
+        }
+
+        this.messageStore[chatId] = filteredMessages;
+      });
+
+      // Guardar en archivo
+      this.saveMessageStore();
+    } catch (error) {
+      console.error("Error en limpieza de mensajes:", error);
+    }
   }
 
   getMessageStorePath() {
@@ -79,11 +114,17 @@ class WhatsAppGroupHandler {
     }
     this.messageStore[chatId].push(message);
 
-    // Limitar el número de mensajes almacenados por chat (últimas 24 horas)
-    const oneDayAgo = moment().subtract(24, "hours").unix();
-    this.messageStore[chatId] = this.messageStore[chatId].filter(
-      (msg) => msg.messageTimestamp >= oneDayAgo
+    // Ordenar mensajes por timestamp
+    this.messageStore[chatId].sort(
+      (a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0)
     );
+
+    // Si superamos el límite, eliminar los más antiguos
+    if (this.messageStore[chatId].length > this.MAX_MESSAGES_PER_CHAT) {
+      this.messageStore[chatId] = this.messageStore[chatId].slice(
+        -this.MAX_MESSAGES_PER_CHAT
+      );
+    }
   }
 
   async waitForConnection(timeout = 30000) {
@@ -218,10 +259,10 @@ class WhatsAppGroupHandler {
     return "<Multimedia omitido>";
   }
 
-  async getGroupMessagesAsString(groupId = null) {
+  async getGroupMessagesAsString(groupId = null, days = 30) {
     await this.waitForConnection();
 
-    const tenHoursAgo = moment().subtract(10, "hours").unix();
+    const cutoffTime = moment().subtract(days, "days").unix();
     const groups = groupId
       ? [groupId]
       : Object.keys(await this.sock.groupFetchAllParticipating());
@@ -232,22 +273,25 @@ class WhatsAppGroupHandler {
       try {
         const metadata = await this.sock.groupMetadata(group);
         const messages = this.messageStore[group] || [];
-        const recentMessages = messages.filter(
-          (msg) => msg.messageTimestamp >= tenHoursAgo
+        const filteredMessages = messages.filter(
+          (msg) => msg.messageTimestamp >= cutoffTime
         );
 
-        for (const msg of recentMessages) {
+        console.log(`Grupo ${metadata.subject}:`);
+        console.log(`- Total mensajes: ${messages.length}`);
+        console.log(
+          `- Mensajes en período (${days} días): ${filteredMessages.length}`
+        );
+
+        for (const msg of filteredMessages) {
           if (msg.key.participant) {
-            // Formato: "DD/MM/YY, HH:mm - Usuario: Mensaje"
             const date = moment(msg.messageTimestamp * 1000).format("DD/MM/YY");
             const time = moment(msg.messageTimestamp * 1000).format("HH:mm");
             const sender = msg.key.participant.split("@")[0];
             const content = this.getMessageContent(msg);
 
-            // Asegurarse de que el contenido no esté vacío
             if (content.trim()) {
-              const formattedMessage = `${date}, ${time} - ${sender}: ${content}`;
-              allMessages += formattedMessage + "\n";
+              allMessages += `${date}, ${time} - ${sender}: ${content}\n`;
             }
           }
         }
