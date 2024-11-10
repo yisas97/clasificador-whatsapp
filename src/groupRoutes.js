@@ -48,62 +48,27 @@ module.exports = function (sock, store, messageStore) {
     let tempFileName = null;
 
     try {
-      // 1. Obtener los mensajes y verificar el contenido
       const messages = await handler.getGroupMessagesAsString(
         req.query.groupId
       );
 
-      console.log("===== CONTENIDO DEL MENSAJE =====");
-      console.log(messages);
-      console.log("=================================");
-
-      if (!messages || messages.trim().length === 0) {
-        throw new Error("No se encontraron mensajes en el grupo");
-      }
-
-      // 2. Formatear los mensajes al formato esperado por la API de Python
-      const formattedMessages = messages
-        .split("\n")
-        .filter((line) => line.trim().length > 0)
-        .map((line) => {
-          // Asumiendo que cada línea tiene el formato: "DD/MM/YY HH:mm - Usuario: Mensaje"
-          const match = line.match(
-            /(\d{2}\/\d{2}\/\d{2}), (\d{1,2}:\d{2}(?:\s?[ap]\.?\s?m\.?)?)\s-\s([^:]+):\s(.+)/i
-          );
-          if (match) {
-            const [_, date, time, user, message] = match;
-            return `${date}, ${time} - ${user}: ${message}`;
-          }
-          return line;
-        })
-        .join("\n");
-
-      console.log("===== MENSAJE FORMATEADO =====");
-      console.log(formattedMessages);
-      console.log("==============================");
-
-      // 3. Crear archivo temporal
-      tempFileName = `temp_chat_${Date.now()}.txt`;
-      fs.writeFileSync(tempFileName, formattedMessages, "utf8");
-
-      // 4. Verificar el archivo creado
-      const fileContent = fs.readFileSync(tempFileName, "utf8");
-      console.log("===== CONTENIDO DEL ARCHIVO =====");
-      console.log(fileContent);
-      console.log("================================");
       console.log(
-        "Tamaño del archivo:",
-        fs.statSync(tempFileName).size,
-        "bytes"
+        `Total de mensajes encontrados: ${messages.split("\n").length}`
       );
 
-      // 5. Crear FormData
+      tempFileName = `temp_chat_${Date.now()}.txt`;
+      fs.writeFileSync(tempFileName, messages, "utf8");
+
       const formData = new FormData();
       formData.append("file", fs.createReadStream(tempFileName));
-      formData.append("method", req.query.method || "lda");
+
+      const messageCount = messages.split("\n").length;
+      const method = messageCount < 10 ? "kmeans" : req.query.method || "lda";
+      console.log(`Usando método: ${method} para ${messageCount} mensajes`);
+
+      formData.append("method", method);
       formData.append("generate_summary", req.query.generate_summary || "true");
 
-      // 6. Enviar a la API de Python
       const analysisResponse = await axios.post(
         "http://localhost:8000/analyze",
         formData,
@@ -124,22 +89,21 @@ module.exports = function (sock, store, messageStore) {
       res.send(Buffer.from(analysisResponse.data));
     } catch (error) {
       console.error("Error completo:", error);
-      console.error("Mensaje del error:", error.message);
 
-      let errorDetails = "No hay detalles adicionales disponibles";
+      let errorDetails;
       if (error.response?.data) {
-        // Si la respuesta es un buffer, convertirlo a string
-        if (Buffer.isBuffer(error.response.data)) {
+        try {
+          const errorText = Buffer.from(error.response.data).toString("utf8");
+          errorDetails = JSON.parse(errorText);
+        } catch {
           errorDetails = error.response.data.toString();
-        } else {
-          errorDetails = error.response.data;
         }
       }
 
       res.status(500).json({
         status: false,
         error: error.message,
-        details: errorDetails,
+        details: errorDetails || "No hay detalles adicionales disponibles",
       });
     } finally {
       if (tempFileName && fs.existsSync(tempFileName)) {
