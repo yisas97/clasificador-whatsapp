@@ -116,7 +116,6 @@ class WhatsAppGroupHandler {
         Object.entries(groups).map(async ([id, group]) => {
           let imageUrl = null;
           try {
-            // Intentar obtener la imagen del grupo
             const ppUrl = await this.sock.profilePictureUrl(id, "image");
             imageUrl = ppUrl;
           } catch (error) {
@@ -124,13 +123,11 @@ class WhatsAppGroupHandler {
               `No se pudo obtener la imagen para el grupo ${group.subject}:`,
               error
             );
-            // Si no hay imagen, usar null
             imageUrl = null;
           }
 
           let inviteCode = null;
           try {
-            // Intentar obtener el código de invitación
             inviteCode = await this.sock.groupInviteCode(id);
           } catch (error) {
             console.log(
@@ -153,17 +150,6 @@ class WhatsAppGroupHandler {
           };
         })
       );
-
-      /**
-      return Object.entries(groups).map(([id, group]) => ({
-        id,
-        nombre: group.subject,
-        participantes: group.participants.length,
-        creador: group.owner || "No disponible",
-        descripcion: group.desc || "Sin descripción",
-      }));
-      **/
-      console.log("Grupos procesados con detalles:", gruposDetallados);
       return gruposDetallados;
     } catch (error) {
       console.error("Error al listar grupos:", error);
@@ -224,14 +210,62 @@ class WhatsAppGroupHandler {
     if (msg.message?.conversation) return msg.message.conversation;
     if (msg.message?.extendedTextMessage?.text)
       return msg.message.extendedTextMessage.text;
-    if (msg.message?.imageMessage?.caption)
-      return `<imagen: ${msg.message.imageMessage.caption}>`;
-    if (msg.message?.videoMessage?.caption)
-      return `<video: ${msg.message.videoMessage.caption}>`;
-    if (msg.message?.documentMessage)
-      return `<documento: ${msg.message.documentMessage.fileName}>`;
-    if (msg.message?.audioMessage) return "<audio>";
-    return "<mensaje multimedia>";
+    if (msg.message?.imageMessage) return "<Multimedia omitido>";
+    if (msg.message?.videoMessage) return "<Multimedia omitido>";
+    if (msg.message?.documentMessage) return "<Multimedia omitido>";
+    if (msg.message?.audioMessage) return "<Multimedia omitido>";
+    if (msg.message?.stickerMessage) return "<Multimedia omitido>";
+    return "<Multimedia omitido>";
+  }
+
+  async getGroupMessagesAsString(groupId = null) {
+    await this.waitForConnection();
+
+    const tenHoursAgo = moment().subtract(10, "hours").unix();
+    const groups = groupId
+      ? [groupId]
+      : Object.keys(await this.sock.groupFetchAllParticipating());
+
+    let allMessages = "";
+
+    for (const group of groups) {
+      try {
+        const metadata = await this.sock.groupMetadata(group);
+        const messages = this.messageStore[group] || [];
+        const recentMessages = messages.filter(
+          (msg) => msg.messageTimestamp >= tenHoursAgo
+        );
+
+        for (const msg of recentMessages) {
+          if (msg.key.participant) {
+            // Formato: "DD/MM/YY, HH:mm - Usuario: Mensaje"
+            const date = moment(msg.messageTimestamp * 1000).format("DD/MM/YY");
+            const time = moment(msg.messageTimestamp * 1000).format("HH:mm");
+            const sender = msg.key.participant.split("@")[0];
+            const content = this.getMessageContent(msg);
+
+            // Asegurarse de que el contenido no esté vacío
+            if (content.trim()) {
+              const formattedMessage = `${date}, ${time} - ${sender}: ${content}`;
+              allMessages += formattedMessage + "\n";
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error procesando grupo ${group}:`, error);
+      }
+    }
+
+    if (!allMessages.trim()) {
+      throw new Error("No se encontraron mensajes en el grupo");
+    }
+
+    // Log para debugging
+    console.log("===== MUESTRA DE MENSAJES =====");
+    console.log(allMessages.split("\n").slice(0, 5).join("\n"));
+    console.log("===============================");
+
+    return allMessages;
   }
 }
 

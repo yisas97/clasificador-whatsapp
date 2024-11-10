@@ -12,9 +12,11 @@
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^6.5.0",
+    "axios": "^1.7.7",
     "body-parser": "^1.20.3",
     "express": "^4.21.1",
     "express-fileupload": "^1.5.1",
+    "form-data": "^4.0.1",
     "moment": "^2.30.1",
     "path": "^0.12.7",
     "pino": "^8.21.0",
