@@ -3,3 +3,4 @@
 /session_auth_info
 baileys_store.json
 src/message_store.json
+**/message_store**.json

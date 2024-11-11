@@ -27,20 +27,133 @@ class WhatsAppGroupHandler {
     this.sock = sock;
     this.store = store;
     this.messageStore = this.loadMessageStore(messageStore);
-    this.MAX_MESSAGES_PER_CHAT = 2000; // Configurable: máximo número de mensajes por chat
-    this.RETENTION_DAYS = 60; // Configurable: días de retención
+    this.MAX_MESSAGES_PER_CHAT = 5000; // Aumentado el límite de mensajes
+    this.RETENTION_DAYS = 90; // Aumentado el período de retención
+    this.SAVE_INTERVAL = 5 * 60 * 1000; // Guardar cada 5 minutos
+    this.BACKUP_INTERVAL = 24 * 60 * 60 * 1000; // Backup diario
 
-    // Configurar limpieza automática cada 6 horas en lugar de cada 5 minutos
-    this.autoSaveInterval = setInterval(() => {
-      this.cleanAndSaveMessageStore();
-    }, 6 * 60 * 60 * 1000);
+    // Inicializar el messageStore
+    this.initializeMessageStore(messageStore);
 
-    // Guardar mensajes antes de cerrar el programa
-    process.on("SIGINT", () => {
+    // Configurar intervalos de guardado y backup
+    this.setupAutomaticSaving();
+    this.setupMessageListener();
+
+    // Manejar el cierre graceful
+    this.setupGracefulShutdown();
+  }
+
+  getMessageStorePath() {
+    return path.join(__dirname, "message_store.json");
+  }
+
+  getBackupPath() {
+    const date = moment().format("YYYYMMDD_HHmmss");
+    return path.join(__dirname, "backups", `message_store_${date}.json`);
+  }
+
+  setupAutomaticSaving() {
+    // Guardar periódicamente
+    this.saveInterval = setInterval(() => {
       this.saveMessageStore();
-      clearInterval(this.autoSaveInterval);
-      process.exit();
-    });
+    }, this.SAVE_INTERVAL);
+
+    // Hacer backup diario
+    this.backupInterval = setInterval(() => {
+      this.createBackup();
+    }, this.BACKUP_INTERVAL);
+  }
+
+  setupMessageListener() {
+    if (this.sock) {
+      this.sock.ev.on("messages.upsert", (messageEvent) => {
+        this.handleNewMessages(messageEvent);
+      });
+    }
+  }
+
+  handleNewMessages(messageEvent) {
+    try {
+      messageEvent.messages.forEach((msg) => {
+        const chatId = msg.key.remoteJid;
+        if (!chatId) return;
+
+        // Inicializar array si no existe
+        if (!this.messageStore[chatId]) {
+          this.messageStore[chatId] = [];
+        }
+
+        // Verificar si el mensaje ya existe
+        const messageExists = this.messageStore[chatId].some(
+          (existingMsg) => existingMsg.key.id === msg.key.id
+        );
+
+        if (!messageExists) {
+          this.messageStore[chatId].push(msg);
+          // Mantener ordenados por timestamp
+          this.messageStore[chatId].sort(
+            (a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0)
+          );
+
+          // Limitar cantidad de mensajes
+          if (this.messageStore[chatId].length > this.MAX_MESSAGES_PER_CHAT) {
+            this.messageStore[chatId] = this.messageStore[chatId].slice(
+              -this.MAX_MESSAGES_PER_CHAT
+            );
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Error al manejar nuevos mensajes:", error);
+    }
+  }
+
+  async getStorageStats() {
+    let stats = {
+      totalGroups: 0,
+      totalMessages: 0,
+      oldestMessage: null,
+      newestMessage: null,
+      averageMessagesPerGroup: 0,
+      storageSize: 0,
+    };
+
+    try {
+      stats.totalGroups = Object.keys(this.messageStore).length;
+
+      for (const messages of Object.values(this.messageStore)) {
+        stats.totalMessages += messages.length;
+
+        if (messages.length > 0) {
+          const timestamps = messages
+            .map((msg) => msg.messageTimestamp)
+            .filter((ts) => ts);
+
+          const oldest = Math.min(...timestamps);
+          const newest = Math.max(...timestamps);
+
+          if (!stats.oldestMessage || oldest < stats.oldestMessage) {
+            stats.oldestMessage = oldest;
+          }
+          if (!stats.newestMessage || newest > stats.newestMessage) {
+            stats.newestMessage = newest;
+          }
+        }
+      }
+
+      stats.averageMessagesPerGroup =
+        stats.totalGroups > 0
+          ? Math.round(stats.totalMessages / stats.totalGroups)
+          : 0;
+
+      const storeSize = fs.statSync(this.getMessageStorePath()).size;
+      stats.storageSize = Math.round((storeSize / (1024 * 1024)) * 100) / 100; // MB
+
+      return stats;
+    } catch (error) {
+      console.error("Error al obtener estadísticas:", error);
+      return stats;
+    }
   }
 
   cleanAndSaveMessageStore() {
@@ -76,35 +189,160 @@ class WhatsAppGroupHandler {
     }
   }
 
-  getMessageStorePath() {
-    return path.join(__dirname, "message_store.json");
+  setupGracefulShutdown() {
+    process.on("SIGINT", async () => {
+      console.log("Cerrando aplicación, guardando mensajes...");
+      await this.saveMessageStore();
+      await this.createBackup();
+      clearInterval(this.saveInterval);
+      clearInterval(this.backupInterval);
+      process.exit(0);
+    });
   }
 
-  loadMessageStore(initialMessageStore) {
+  async createBackup() {
+    try {
+      const backupDir = path.join(__dirname, "backups");
+      if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir);
+      }
+
+      const backupPath = this.getBackupPath();
+      fs.writeFileSync(backupPath, JSON.stringify(this.messageStore, null, 2));
+      console.log(`Backup creado en: ${backupPath}`);
+
+      // Mantener solo los últimos 7 backups
+      const backups = fs
+        .readdirSync(backupDir)
+        .filter((file) => file.startsWith("message_store_"))
+        .sort()
+        .reverse();
+
+      if (backups.length > 7) {
+        backups.slice(7).forEach((file) => {
+          fs.unlinkSync(path.join(backupDir, file));
+        });
+      }
+    } catch (error) {
+      console.error("Error al crear backup:", error);
+    }
+  }
+
+  async recoverFromBackup() {
+    try {
+      const backupDir = path.join(__dirname, "backups");
+      if (!fs.existsSync(backupDir)) return;
+
+      const backups = fs
+        .readdirSync(backupDir)
+        .filter((file) => file.startsWith("message_store_"))
+        .sort()
+        .reverse();
+
+      if (backups.length > 0) {
+        const lastBackup = path.join(backupDir, backups[0]);
+        const data = fs.readFileSync(lastBackup, "utf8");
+        this.messageStore = JSON.parse(data);
+        console.log(`Recuperado del backup: ${lastBackup}`);
+      }
+    } catch (error) {
+      console.error("Error al recuperar del backup:", error);
+      this.messageStore = {};
+    }
+  }
+
+  async cleanAndVerifyStore() {
+    const cutoffTime = moment().subtract(this.RETENTION_DAYS, "days").unix();
+    let totalMessagesBefore = 0;
+    let totalMessagesAfter = 0;
+
+    for (const chatId of Object.keys(this.messageStore)) {
+      if (!Array.isArray(this.messageStore[chatId])) {
+        this.messageStore[chatId] = [];
+        continue;
+      }
+
+      totalMessagesBefore += this.messageStore[chatId].length;
+
+      // Filtrar mensajes válidos y dentro del período de retención
+      this.messageStore[chatId] = this.messageStore[chatId]
+        .filter((msg) => {
+          return (
+            msg &&
+            msg.messageTimestamp &&
+            msg.messageTimestamp > cutoffTime &&
+            msg.key &&
+            msg.key.remoteJid
+          );
+        })
+        .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+
+      // Limitar cantidad de mensajes por chat
+      if (this.messageStore[chatId].length > this.MAX_MESSAGES_PER_CHAT) {
+        this.messageStore[chatId] = this.messageStore[chatId].slice(
+          -this.MAX_MESSAGES_PER_CHAT
+        );
+      }
+
+      totalMessagesAfter += this.messageStore[chatId].length;
+    }
+
+    console.log(
+      `Limpieza completada: ${totalMessagesBefore} -> ${totalMessagesAfter} mensajes`
+    );
+  }
+
+  async initializeMessageStore(initialMessageStore) {
+    try {
+      // Cargar mensajes del archivo principal
+      await this.loadMessageStore();
+
+      // Integrar mensajes iniciales si existen
+      if (initialMessageStore && Object.keys(initialMessageStore).length > 0) {
+        for (const [chatId, messages] of Object.entries(initialMessageStore)) {
+          if (!this.messageStore[chatId]) {
+            this.messageStore[chatId] = [];
+          }
+          this.messageStore[chatId].push(...messages);
+        }
+        await this.saveMessageStore();
+      }
+
+      console.log("Message store inicializado con éxito");
+    } catch (error) {
+      console.error("Error al inicializar message store:", error);
+      throw error;
+    }
+  }
+
+  async loadMessageStore() {
     const storePath = this.getMessageStorePath();
     try {
       if (fs.existsSync(storePath)) {
-        const storedData = JSON.parse(fs.readFileSync(storePath, "utf8"));
-        console.log(
-          "Mensajes cargados del archivo:",
-          Object.keys(storedData).length,
-          "chats"
-        );
-        return { ...storedData, ...initialMessageStore };
+        const data = fs.readFileSync(storePath, "utf8");
+        this.messageStore = JSON.parse(data);
+        console.log(`Mensajes cargados de ${storePath}`);
+
+        // Verificar integridad y limpiar mensajes antiguos
+        await this.cleanAndVerifyStore();
       }
     } catch (error) {
-      console.error("Error al cargar el message store:", error);
+      console.error("Error al cargar message store:", error);
+      // Si hay error al cargar, intentar recuperar del último backup
+      await this.recoverFromBackup();
     }
-    return initialMessageStore;
   }
 
-  saveMessageStore() {
-    const storePath = this.getMessageStorePath();
+  async saveMessageStore() {
     try {
+      const storePath = this.getMessageStorePath();
+      await this.cleanAndVerifyStore();
       fs.writeFileSync(storePath, JSON.stringify(this.messageStore, null, 2));
-      console.log("Message store guardado en:", storePath);
+      console.log(`Message store guardado en: ${storePath}`);
     } catch (error) {
-      console.error("Error al guardar el message store:", error);
+      console.error("Error al guardar message store:", error);
+      // Intentar crear un backup en caso de error al guardar
+      await this.createBackup();
     }
   }
 

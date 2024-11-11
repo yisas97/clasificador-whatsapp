@@ -120,5 +120,20 @@ module.exports = function (sock, store, messageStore) {
     }
   });
 
+  /**
+   * Monitorear los estados
+   */
+  router.get("/storage-stats", async (req, res) => {
+    try {
+      const stats = await handler.getStorageStats();
+      res.json({ status: true, stats });
+    } catch (error) {
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
+
   return router;
 };
