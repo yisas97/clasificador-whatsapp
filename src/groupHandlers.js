@@ -147,6 +147,10 @@ class WhatsAppGroupHandler {
     console.log("Conexión establecida correctamente");
   }
 
+  async getGroupMessageCount(groupId) {
+    return this.messageStore[groupId]?.length || 0;
+  }
+
   async listGroups() {
     await this.waitForConnection();
     try {
@@ -177,6 +181,8 @@ class WhatsAppGroupHandler {
             );
           }
 
+          const messageCount = await this.getGroupMessageCount(id);
+
           return {
             id,
             nombre: group.subject,
@@ -188,6 +194,7 @@ class WhatsAppGroupHandler {
             creacion: group.creation || null,
             restrict: group.restrict || false,
             announce: group.announce || false,
+            mensajesAlmacenados: messageCount,
           };
         })
       );

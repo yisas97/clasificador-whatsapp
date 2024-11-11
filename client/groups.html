@@ -57,6 +57,7 @@
         margin: 0 0 5px 0;
       }
 
+      /**
       .group-details {
         color: #666;
         font-size: 0.9em;
@@ -65,6 +66,27 @@
         -webkit-box-orient: vertical;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+        **/
+      
+      .group-details {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .group-details p {
+        margin: 0;
+        line-height: 1.4;
+      }
+
+      .message-count, .participant-count {
+        font-size: 0.9em;
+        color: #555;
+      }
+
+      .message-count strong, .participant-count strong {
+        color: #03773f;
       }
 
       .export-btn {
@@ -363,30 +385,34 @@
                 </div>`;
 
           li.innerHTML = `
-                    <div class="group-image-container">
-                        ${imageHtml}
-                    </div>
-                    <div class="group-info">
-                        <h3 class="group-name">${group.nombre}</h3>
-                        <div class="group-details">
-                            <p>Descripción: ${
-                              group.descripcion || "Sin descripción"
-                            }</p>
-                        </div>
-                    </div>
-                    <div class="button-container">
-                        <button class="export-btn" onclick="exportGroupMessages('${
-                          group.id
-                        }')">
-                            Temas
-                        </button>
-                        <button class="classify-btn" onclick="openClassifyModal('${
-                          group.id
-                        }')">
-                            Clasificar
-                        </button>
-                    </div>
-                `;
+            <div class="group-image-container">
+                ${imageHtml}
+            </div>
+            <div class="group-info">
+                <h3 class="group-name">${group.nombre}</h3>
+                <div class="group-details">
+                    <p>Descripción: ${group.descripcion || "Sin descripción"}</p>
+                    <p class="message-count">
+                      <strong>Mensajes almacenados:</strong> ${group.mensajesAlmacenados.toLocaleString()}
+                    </p>
+                    <p class="participant-count">
+                      <strong>Participantes:</strong> ${group.participantes}
+                    </p>
+                </div>
+            </div>
+            <div class="button-container">
+                <button class="export-btn" onclick="exportGroupMessages('${
+                  group.id
+                }')">
+                    Temas
+                </button>
+                <button class="classify-btn" onclick="openClassifyModal('${
+                  group.id
+                }')">
+                    Clasificar
+                </button>
+            </div>
+            `;
           groupsList.appendChild(li);
         });
 
