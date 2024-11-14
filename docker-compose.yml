@@ -1,40 +1,17 @@
 version: '3.8'
 
 services:
-  whatsapp-api:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-    container_name: whatsapp-api
-    volumes:
-      - ./session_auth_info:/usr/src/app/session_auth_info
-      - ./store:/usr/src/app/store
-      - ./messages_store:/usr/src/app/messages_store
-      # Solo para desarrollo
-      - .:/usr/src/app
-      - /usr/src/app/node_modules
+  postgres:
+    image: postgres:14-alpine
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - MESSAGES_LIMIT=1000
-      - MESSAGE_STORE_SIZE=1000
-      - STORE_MESSAGES=true
-      - STORE_PATH=/usr/src/app/store
-      - SESSION_DIR=/usr/src/app/session_auth_info
-      - DEBUG=baileys*
+      POSTGRES_DB: whatsapp_messages
+      POSTGRES_USER: whatsapp_user
+      POSTGRES_PASSWORD: whatsapp_password
     ports:
-      - "3000:3000"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2'
-        reservations:
-          memory: 1G
-          cpus: '1'
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  postgres_data:

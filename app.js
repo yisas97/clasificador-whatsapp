@@ -14,11 +14,9 @@ const fileUpload = require("express-fileupload");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const app = require("express")();
-const groupRoutes = require("./src/groupRoutes");
 
 const fs = require("fs");
 const moment = require("moment");
-
 
 // enable files upload
 app.use(
@@ -56,9 +54,6 @@ app.get("/groups", (req, res) => {
   });
 });
 
-
-
-
 app.get("/", (req, res) => {
   res.send("server working");
 });
@@ -85,7 +80,6 @@ async function connectToWhatsApp() {
 
   store.bind(sock.ev);
 
-  // Añadir console.log para debug
   console.log("Socket creado:", !!sock);
 
   sock.ev.on("connection.update", async (update) => {
@@ -128,31 +122,32 @@ async function connectToWhatsApp() {
     } else if (connection === "open") {
       console.log("Conexión abierta");
 
-      // Pasar `messageStore` a groupRoutes
-      const groupRouter = require("./src/groupRoutes")(
-        sock,
-        store,
-        messageStore
-      );
-      app.use("/api/groups", groupRouter);
-      console.log("Router de grupos configurado");
+      // Aquí es donde inicializamos el handler con la base de datos
+      try {
+        // Importar la clase WhatsAppGroupHandler
+        const WhatsAppGroupHandler = require("./src/groupHandlers");
+        // Crear una nueva instancia
+        const handler = new WhatsAppGroupHandler(sock, store);
+        // Inicializar la conexión a la BD
+        await handler.init();
+
+        // Configurar las rutas con el handler inicializado
+        const groupRouter = require("./src/groupRoutes")(sock, store, handler);
+        app.use("/api/groups", groupRouter);
+        console.log(
+          "Router de grupos y base de datos configurados correctamente"
+        );
+      } catch (error) {
+        console.error(
+          "Error al inicializar el handler o la base de datos:",
+          error
+        );
+      }
     }
   });
 
   sock.ev.on("messages.upsert", (messageEvent) => {
     console.log("Mensaje recibido:", messageEvent.messages);
-
-    messageEvent.messages.forEach((msg) => {
-      const chatId = msg.key.remoteJid;
-
-      // Inicializar el array para el `chatId` si no existe
-      if (!messageStore[chatId]) {
-        messageStore[chatId] = [];
-      }
-
-      // Agregar el nuevo mensaje al array correspondiente al `chatId`
-      messageStore[chatId].push(msg);
-    });
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -241,12 +236,10 @@ const updateQR = (data) => {
       const { id, name } = sock?.user;
       const userinfo = id + " " + name;
       soket?.emit("user", userinfo);
-
       break;
     case "loading":
       soket?.emit("qrstatus", "./assets/loader.gif");
       soket?.emit("log", "Cargando ....");
-
       break;
     default:
       break;

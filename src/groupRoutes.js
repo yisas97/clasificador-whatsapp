@@ -3,17 +3,22 @@ const router = express.Router();
 const fs = require("fs");
 const axios = require("axios");
 const FormData = require("form-data");
-const WhatsAppGroupHandler = require("./groupHandlers");
 
-module.exports = function (sock, store, messageStore) {
-  console.log("Inicializando rutas con socket:", !!sock);
+// Modificamos la función para recibir el handler ya inicializado
+module.exports = function (sock, store, handler) {
+  console.log("Inicializando rutas con socket y handler:", !!sock, !!handler);
 
   if (!sock) {
     console.error("Socket no disponible al inicializar rutas");
     throw new Error("Socket es requerido para inicializar las rutas");
   }
 
-  const handler = new WhatsAppGroupHandler(sock, store, messageStore);
+  if (!handler) {
+    console.error("Handler no disponible al inicializar rutas");
+    throw new Error("Handler es requerido");
+  }
+
+  // Ya no creamos una nueva instancia del handler aquí
 
   router.get("/list-groups", async (req, res) => {
     try {
@@ -31,7 +36,10 @@ module.exports = function (sock, store, messageStore) {
 
   router.get("/export-group-messages", async (req, res) => {
     try {
-      const fileName = await handler.exportGroupMessages(req.query.groupId);
+      const messages = await handler.exportGroupMessages(req.query.groupId);
+      const fileName = `chat_export_${Date.now()}.txt`;
+      fs.writeFileSync(fileName, messages);
+
       res.download(fileName, (err) => {
         if (err) console.error("Error enviando archivo:", err);
         fs.unlinkSync(fileName);
@@ -48,7 +56,7 @@ module.exports = function (sock, store, messageStore) {
     let tempFileName = null;
 
     try {
-      const days = parseInt(req.query.days) || 30; // Parámetro nuevo para días
+      const days = parseInt(req.query.days) || 30;
       const messages = await handler.getGroupMessagesAsString(
         req.query.groupId,
         days
@@ -67,7 +75,6 @@ module.exports = function (sock, store, messageStore) {
 
       const messageCount = messages.split("\n").length;
       const method = messageCount < 10 ? "kmeans" : req.query.method || "lda";
-      console.log(`Usando método: ${method} para ${messageCount} mensajes`);
 
       formData.append("method", method);
       formData.append("generate_summary", req.query.generate_summary || "true");
@@ -92,21 +99,12 @@ module.exports = function (sock, store, messageStore) {
       res.send(Buffer.from(analysisResponse.data));
     } catch (error) {
       console.error("Error completo:", error);
-
-      let errorDetails;
-      if (error.response?.data) {
-        try {
-          const errorText = Buffer.from(error.response.data).toString("utf8");
-          errorDetails = JSON.parse(errorText);
-        } catch {
-          errorDetails = error.response.data.toString();
-        }
-      }
-
       res.status(500).json({
         status: false,
         error: error.message,
-        details: errorDetails || "No hay detalles adicionales disponibles",
+        details: error.response?.data
+          ? error.response.data.toString()
+          : "No hay detalles adicionales",
       });
     } finally {
       if (tempFileName && fs.existsSync(tempFileName)) {
@@ -120,12 +118,9 @@ module.exports = function (sock, store, messageStore) {
     }
   });
 
-  /**
-   * Monitorear los estados
-   */
   router.get("/storage-stats", async (req, res) => {
     try {
-      const stats = await handler.getStorageStats();
+      const stats = await handler.db.getStorageStats();
       res.json({ status: true, stats });
     } catch (error) {
       res.status(500).json({
