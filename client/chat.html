@@ -147,15 +147,102 @@
             margin: 20px;
         }
 
+        .topic-info {
+            background: rgba(3, 119, 63, 0.1);
+            padding: 10px;
+            margin: 10px;
+            border-radius: 8px;
+        }
+
+        .topic-keywords {
+            font-size: 0.9em;
+            color: #03773f;
+            margin-top: 5px;
+        }
+
+        .message {
+        max-width: 65%;
+        margin: 8px 0;
+        padding: 12px;
+        border-radius: 10px;
+        position: relative;
+        word-wrap: break-word;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .message.received {
+        background: white;
+        margin-right: auto;
+        border-top-left-radius: 0;
+    }
+
+    .message.sent {
+        background: #dcf8c6;
+        margin-left: auto;
+        border-top-right-radius: 0;
+    }
+
+    .message-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 4px;
+        font-size: 0.8em;
+    }
+
+    .sender {
+        color: #03773f;
+        font-weight: bold;
+    }
+
+    .timestamp {
+        color: #999;
+        font-size: 0.85em;
+        margin-left: 8px;
+    }
+
+    .message-content {
+        font-size: 0.95em;
+        line-height: 1.4;
+    }
+
+    /* Añadir una pequeña flecha a los mensajes */
+    .message.received::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -8px;
+        width: 0;
+        height: 0;
+        border: 8px solid transparent;
+        border-top-color: white;
+        border-right-color: white;
+    }
+
+    .message.sent::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: -8px;
+        width: 0;
+        height: 0;
+        border: 8px solid transparent;
+        border-top-color: #dcf8c6;
+        border-left-color: #dcf8c6;
+    }
+
     </style>
 </head>
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <button class="back-button" onclick="window.location.href='/groups'">&larr;</button>
+            <button class="back-button" onclick="window.location.href='/api/groups/topics?groupId=' + groupId">&larr;</button>
             <div class="group-info">
                 <h2 class="group-name">Cargando...</h2>
-                <p class="participant-count">Cargando participantes...</p>
+                <p class="topic-info">
+                    <strong>Tema <span id="topicNumber">0</span></strong>
+                    <div class="topic-keywords" id="topicKeywords"></div>
+                </p>
             </div>
         </div>
 
@@ -173,35 +260,61 @@
         const socket = io();
         const urlParams = new URLSearchParams(window.location.search);
         const groupId = urlParams.get('groupId');
-        let groupInfo = null;
+        const topicId = urlParams.get('topic');
+        let currentUser = null;
 
         async function loadGroupInfo() {
             try {
-                const response = await fetch('/api/groups/list-groups');
-                const data = await response.json();
-                if (data.status && data.grupos) {
-                    groupInfo = data.grupos.find(g => g.id === groupId);
+                // Primero cargar información del grupo
+                const groupResponse = await fetch('/api/groups/list-groups');
+                const groupData = await groupResponse.json();
+                if (groupData.status && groupData.grupos) {
+                    groupInfo = groupData.grupos.find(g => g.id === groupId);
                     if (groupInfo) {
                         document.querySelector('.group-name').textContent = groupInfo.nombre;
-                        document.querySelector('.participant-count').textContent = 
-                            `${groupInfo.participantes} participantes`;
                     }
                 }
+
+                // Luego cargar información del tema
+                const topicResponse = await fetch(`/api/groups/topic-info?groupId=${groupId}&topic=${topicId}`);
+                const topicData = await topicResponse.json();
+                
+                if (topicData.status && topicData.topic) {
+                    document.getElementById('topicNumber').textContent = parseInt(topicId) + 1;
+                    document.getElementById('topicKeywords').textContent = 
+                        'Palabras clave: ' + topicData.topic.keywords.join(', ');
+                }
             } catch (error) {
-                console.error('Error cargando información del grupo:', error);
+                console.error('Error cargando información:', error);
+            }
+        }
+
+        async function loadTopicInfo() {
+            try {
+                const response = await fetch(`/api/groups/topic-info?groupId=${groupId}&topic=${topicId}`);
+                const data = await response.json();
+                
+                if (data.status && data.topic) {
+                    document.querySelector('.group-name').textContent = data.groupName;
+                    document.getElementById('topicNumber').textContent = parseInt(topicId) + 1;
+                    document.getElementById('topicKeywords').textContent = 
+                        'Palabras clave: ' + data.topic.keywords.join(', ');
+                }
+            } catch (error) {
+                console.error('Error cargando información del tema:', error);
             }
         }
 
         async function loadMessages() {
             try {
-                const response = await fetch(`/api/groups/get-messages?groupId=${groupId}`);
+                const response = await fetch(`/api/groups/topic-messages?groupId=${groupId}&topic=${topicId}`);
                 const data = await response.json();
                 
                 const messagesContainer = document.getElementById('messages');
                 if (!data.messages || data.messages.length === 0) {
                     messagesContainer.innerHTML = `
                         <div class="no-messages">
-                            <h3>No hay mensajes nuevos</h3>
+                            <h3>No hay mensajes en este tema</h3>
                             <p>Los mensajes aparecerán aquí</p>
                         </div>`;
                     return;
@@ -214,26 +327,51 @@
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             } catch (error) {
                 console.error('Error cargando mensajes:', error);
+                messagesContainer.innerHTML = `
+                    <div class="no-messages">
+                        <h3>Error al cargar mensajes</h3>
+                        <p>${error.message}</p>
+                    </div>`;
+            }
+        }
+
+        async function getCurrentUser() {
+            try {
+                const response = await fetch('/api/groups/current-user');
+                const data = await response.json();
+                if (data.status && data.user) {
+                    currentUser = data.user.id;
+                }
+            } catch (error) {
+                console.error('Error obteniendo usuario actual:', error);
             }
         }
 
         function createMessageHTML(message) {
-            const isReceived = message.sender_jid !== 'TU_ID'; // Ajusta esto según tu lógica
+            
+            const isReceived = message.usuario !== currentUser;
             const messageClass = isReceived ? 'received' : 'sent';
-            const date = new Date(message.timestamp * 1000);
-            const timeString = date.toLocaleTimeString('es-ES', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
+
+            const timeString = message.hora || '';
+            const dateString = message.fecha || '';
+
+            let senderName = message.usuario;
+            /**
+            const nameMapping = {
+                '51926292692': 'Yisas',
+                '51921884220': 'Yisas2',
+            };
+            **/
+            //senderName = nameMapping[senderName] || senderName;
 
             return `
                 <div class="message ${messageClass}">
                     <div class="message-info">
-                        <span class="sender">${isReceived ? message.sender_name || 'Usuario' : 'Tú'}</span>
-                        <span class="timestamp">${timeString}</span>
+                        <span class="sender">${senderName}</span>
+                        <span class="timestamp">${dateString} ${timeString}</span>
                     </div>
                     <div class="message-content">
-                        ${message.content}
+                        ${message.mensaje_original}
                     </div>
                 </div>`;
         }
@@ -252,6 +390,7 @@
                     },
                     body: JSON.stringify({
                         groupId: groupId,
+                        topicId: topicId,
                         message: message
                     })
                 });
@@ -259,11 +398,13 @@
                 const data = await response.json();
                 if (data.status) {
                     input.value = '';
-                    loadMessages(); // Recargar mensajes después de enviar
+                    loadMessages();
+                } else {
+                    throw new Error(data.error || 'Error al enviar mensaje');
                 }
             } catch (error) {
                 console.error('Error enviando mensaje:', error);
-                alert('Error al enviar el mensaje');
+                alert('Error al enviar el mensaje: ' + error.message);
             }
         }
 
@@ -274,27 +415,29 @@
             }
         });
 
-        // Configurar Socket.IO para mensajes en tiempo real
         socket.on('new_message', (message) => {
-            if (message.groupId === groupId) {
+            if (message.groupId === groupId && message.topicId === topicId) {
                 const messagesContainer = document.getElementById('messages');
                 messagesContainer.innerHTML += createMessageHTML(message);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
         });
 
-        // Inicializar la página
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!groupId) {
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!groupId || topicId === null) {
                 window.location.href = '/groups';
                 return;
             }
             
+            await getCurrentUser();
             loadGroupInfo();
             loadMessages();
-
-            // Recargar mensajes periódicamente
-            setInterval(loadMessages, 10000); // Cada 10 segundos
+            
+            const messageInterval = setInterval(loadMessages, 10000);
+            
+            window.addEventListener('beforeunload', () => {
+                clearInterval(messageInterval);
+            });
         });
     </script>
 </body>

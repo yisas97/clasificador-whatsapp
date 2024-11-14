@@ -122,9 +122,7 @@ async function connectToWhatsApp() {
     } else if (connection === "open") {
       console.log("Conexión abierta");
 
-      // Aquí es donde inicializamos el handler con la base de datos
       try {
-        // Importar la clase WhatsAppGroupHandler
         const WhatsAppGroupHandler = require("./src/groupHandlers");
         // Crear una nueva instancia
         const handler = new WhatsAppGroupHandler(sock, store);

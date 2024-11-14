@@ -4,7 +4,6 @@ const fs = require("fs");
 const axios = require("axios");
 const FormData = require("form-data");
 
-// Modificamos la función para recibir el handler ya inicializado
 module.exports = function (sock, store, handler) {
   console.log("Inicializando rutas con socket y handler:", !!sock, !!handler);
 
@@ -18,9 +17,13 @@ module.exports = function (sock, store, handler) {
     throw new Error("Handler es requerido");
   }
 
-  // Ruta para servir la página de chat
   router.get("/chat", (req, res) => {
-    res.sendFile("chat.html", { root: "./client" });
+    res.sendFile("chat.html", {
+      root: "./client",
+      headers: {
+        "Content-Type": "text/html",
+      },
+    });
   });
 
   // Obtener mensajes de un grupo
@@ -63,14 +66,37 @@ module.exports = function (sock, store, handler) {
   router.get("/list-groups", async (req, res) => {
     try {
       console.log("Solicitando lista de grupos");
+
+      // Intentar reconectar
+      if (!handler.isConnected) {
+        await handler.waitForConnection();
+      }
+
       const groups = await handler.listGroups();
       res.json({ status: true, grupos: groups });
     } catch (error) {
       console.error("Error al listar grupos:", error);
-      res.status(500).json({
-        status: false,
-        error: error.message,
-      });
+      if (
+        error.message.includes("Connection Closed") ||
+        error.message.includes("No hay conexión")
+      ) {
+        try {
+          await handler.handleReconnection();
+          const groups = await handler.listGroups();
+          res.json({ status: true, grupos: groups });
+        } catch (retryError) {
+          res.status(503).json({
+            status: false,
+            error: "Error de conexión. Por favor, refresque la página.",
+            details: retryError.message,
+          });
+        }
+      } else {
+        res.status(500).json({
+          status: false,
+          error: error.message,
+        });
+      }
     }
   });
 
@@ -158,10 +184,123 @@ module.exports = function (sock, store, handler) {
     }
   });
 
+  router.get("/analyze-topics", async (req, res) => {
+    try {
+      const groupId = req.query.groupId;
+      if (!groupId) {
+        throw new Error("GroupId es requerido");
+      }
+
+      // Obtener los mensajes del grupo
+      const messages = await handler.getGroupMessagesAsString(groupId);
+
+      // Crear un archivo temporal con los mensajes
+      const tempFile = `temp_chat_${Date.now()}.txt`;
+      fs.writeFileSync(tempFile, messages);
+
+      // Llamar al servicio de Python
+      const formData = new FormData();
+      formData.append("file", fs.createReadStream(tempFile));
+      formData.append("method", "lda");
+
+      const response = await axios.post(
+        "http://localhost:8000/analyze",
+        formData,
+        {
+          headers: {
+            ...formData.getHeaders(),
+          },
+          responseType: "json",
+        }
+      );
+
+      // Procesar la respuesta
+      if (response.data && response.data.topics) {
+        res.json({
+          status: true,
+          topics: response.data.topics,
+        });
+      } else {
+        throw new Error("Error en el análisis de temas");
+      }
+    } catch (error) {
+      console.error("Error analizando temas:", error);
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
+
   router.get("/storage-stats", async (req, res) => {
     try {
       const stats = await handler.db.getStorageStats();
       res.json({ status: true, stats });
+    } catch (error) {
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/current-user", (req, res) => {
+    try {
+      if (sock?.user) {
+        res.json({
+          status: true,
+          user: {
+            id: sock.user.id.split(":")[0],
+            name: sock.user.name,
+          },
+        });
+      } else {
+        throw new Error("Usuario no encontrado");
+      }
+    } catch (error) {
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/topics", (req, res) => {
+    res.sendFile("topics.html", { root: "./client" });
+  });
+
+  router.get("/topic-info", async (req, res) => {
+    try {
+      const { groupId, topic } = req.query;
+      const topics = await handler.getTopics(groupId);
+
+      if (topics && topics[topic]) {
+        const groupInfo = await handler.getGroupInfo(groupId);
+        res.json({
+          status: true,
+          groupName: groupInfo.subject,
+          topic: topics[topic],
+        });
+      } else {
+        throw new Error("Tema no encontrado");
+      }
+    } catch (error) {
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/topic-messages", async (req, res) => {
+    try {
+      const { groupId, topic } = req.query;
+      const messages = await handler.getTopicMessages(groupId, topic);
+
+      res.json({
+        status: true,
+        messages,
+      });
     } catch (error) {
       res.status(500).json({
         status: false,

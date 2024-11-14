@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Temas del Chat</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+    <style>
+        body {
+            background: rgb(200, 220, 224);
+            font-family: Helvetica, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            background: #03773f;
+            color: white;
+            padding: 15px;
+            margin: -20px -20px 20px -20px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .back-button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            margin-right: 15px;
+        }
+
+        .group-info {
+            flex: 1;
+        }
+
+        .topics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 20px 0;
+        }
+
+        .topic-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            border: 1px solid #dee2e6;
+        }
+
+        .topic-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .topic-number {
+            color: #03773f;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .topic-keywords {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .message-count {
+            font-size: 0.8em;
+            color: #03773f;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button class="back-button" onclick="window.location.href='/groups'">&larr;</button>
+            <div class="group-info">
+                <h2 id="group-name">Cargando...</h2>
+                <p id="group-participants">Cargando participantes...</p>
+            </div>
+        </div>
+
+        <div id="topics-container">
+            <div class="loading">Analizando mensajes del grupo...</div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const urlParams = new URLSearchParams(window.location.search);
+        const groupId = urlParams.get('groupId');
+
+        async function loadGroupInfo() {
+            try {
+                const response = await fetch('/api/groups/list-groups');
+                const data = await response.json();
+                if (data.status && data.grupos) {
+                    const group = data.grupos.find(g => g.id === groupId);
+                    if (group) {
+                        document.getElementById('group-name').textContent = group.nombre;
+                        document.getElementById('group-participants').textContent = 
+                            `${group.participantes} participantes`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error cargando información del grupo:', error);
+            }
+        }
+
+        async function analyzeTopics() {
+            try {
+                const response = await fetch(`/api/groups/analyze-topics?groupId=${groupId}`);
+                const data = await response.json();
+                
+                if (data.status && data.topics) {
+                    displayTopics(data.topics);
+                } else {
+                    throw new Error('No se pudieron obtener los temas');
+                }
+            } catch (error) {
+                console.error('Error analizando temas:', error);
+                document.getElementById('topics-container').innerHTML = 
+                    '<div class="loading">Error al analizar los temas. Intente nuevamente.</div>';
+            }
+        }
+
+        function displayTopics(topics) {
+            const container = document.getElementById('topics-container');
+            const topicsGrid = document.createElement('div');
+            topicsGrid.className = 'topics-grid';
+
+            Object.entries(topics).forEach(([topicNum, topicData]) => {
+                const card = document.createElement('div');
+                card.className = 'topic-card';
+                card.onclick = () => openTopicChat(groupId, topicNum);
+
+                card.innerHTML = `
+                    <div class="topic-number">Tema ${parseInt(topicNum) + 1}</div>
+                    <div class="topic-keywords">${topicData.keywords.slice(0, 5).join(', ')}</div>
+                    <div class="message-count">${topicData.message_count} mensajes</div>
+                `;
+
+                topicsGrid.appendChild(card);
+            });
+
+            container.innerHTML = '';
+            container.appendChild(topicsGrid);
+        }
+
+        function openTopicChat(groupId, topicNum) {
+            window.location.href = `/api/groups/chat?groupId=${groupId}&topic=${topicNum}`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!groupId) {
+                window.location.href = '/groups';
+                return;
+            }
+            
+            loadGroupInfo();
+            analyzeTopics();
+        });
+    </script>
+</body>
+</html>

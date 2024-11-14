@@ -85,12 +85,14 @@
         line-height: 1.4;
       }
 
-      .message-count, .participant-count {
+      .message-count,
+      .participant-count {
         font-size: 0.9em;
         color: #555;
       }
 
-      .message-count strong, .participant-count strong {
+      .message-count strong,
+      .participant-count strong {
         color: #03773f;
       }
 
@@ -162,6 +164,12 @@
       </div>
     </div>
 
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="loading-message">
+        Analizando mensajes del grupo...
+      </div>
+    </div>
+
     <script>
       let socket;
 
@@ -204,16 +212,29 @@
 
       function truncateDescription(description, maxLength = 400) {
         if (!description) return "Sin descripción";
-        return description.length > maxLength 
+        return description.length > maxLength
           ? description.substring(0, maxLength) + "..."
           : description;
+      }
+
+      async function handleGroupClick(groupId) {
+        try {
+          document.getElementById("loadingOverlay").style.display = "flex";
+
+          window.location.href = `/api/groups/topics?groupId=${groupId}`;
+        } catch (error) {
+          console.error("Error:", error);
+          alert("Error al procesar el grupo");
+          document.getElementById("loadingOverlay").style.display = "none";
+        }
       }
 
       function displayGroups(groups) {
         const container = document.getElementById("groups-container");
 
         if (groups.length === 0) {
-          container.innerHTML = '<div class="loading">No se encontraron grupos</div>';
+          container.innerHTML =
+            '<div class="loading">No se encontraron grupos</div>';
           return;
         }
 
@@ -223,30 +244,31 @@
         groups.forEach((group) => {
           const li = document.createElement("li");
           li.className = "group-item";
-          li.onclick = () => openChat(group.id);
+          li.onclick = () => handleGroupClick(group.id);
 
           const imageHtml = group.imagen
             ? `<img src="${group.imagen}" alt="${group.nombre}" class="group-image" />`
             : `<div class="group-image-placeholder">
-                <span>${group.nombre.charAt(0).toUpperCase()}</span>
-               </div>`;
+                        <span>${group.nombre.charAt(0).toUpperCase()}</span>
+                       </div>`;
 
           li.innerHTML = `
-            <div class="group-image-container">
-                ${imageHtml}
-            </div>
-            <div class="group-info">
-                <h3 class="group-name">${group.nombre}</h3>
-                <p class="group-description">${truncateDescription(group.descripcion)}</p>
-                <div class="group-details">
-                    <p class="message-count">
-                        <strong>Mensajes:</strong> ${group.mensajesAlmacenados.toLocaleString()}
-                    </p>
-                    <p class="participant-count">
-                        <strong>Participantes:</strong> ${group.participantes}
-                    </p>
-                </div>
-            </div>`;
+                    <div class="group-image-container">
+                        ${imageHtml}
+                    </div>
+                    <div class="group-info">
+                        <h3 class="group-name">${group.nombre}</h3>
+                        <p class="group-description">${truncateDescription(
+                          group.descripcion
+                        )}</p>
+                        <div class="group-details">
+                            <p class="participant-count">
+                                <strong>Participantes:</strong> ${
+                                  group.participantes
+                                }
+                            </p>
+                        </div>
+                    </div>`;
 
           groupsList.appendChild(li);
         });
