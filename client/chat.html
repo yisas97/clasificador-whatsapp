@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Chat de Grupo</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+    <style>
+        body {
+            background: rgb(200, 220, 224);
+            font-family: Helvetica, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            max-width: 1000px;
+            margin: 0 auto;
+            width: 100%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-header {
+            background: #03773f;
+            color: white;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .back-button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            margin-right: 15px;
+        }
+
+        .group-info {
+            flex: 1;
+        }
+
+        .group-name {
+            margin: 0;
+            font-size: 1.2em;
+        }
+
+        .participant-count {
+            margin: 5px 0 0;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #e5ddd5;
+        }
+
+        .message {
+            max-width: 65%;
+            margin: 8px 0;
+            padding: 10px;
+            border-radius: 7.5px;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .message.received {
+            background: white;
+            margin-right: auto;
+            border-top-left-radius: 0;
+        }
+
+        .message.sent {
+            background: #dcf8c6;
+            margin-left: auto;
+            border-top-right-radius: 0;
+        }
+
+        .message-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.8em;
+        }
+
+        .sender {
+            color: #03773f;
+            font-weight: bold;
+        }
+
+        .timestamp {
+            color: #999;
+            font-size: 0.75em;
+            margin-left: 8px;
+        }
+
+        .input-container {
+            display: flex;
+            padding: 10px;
+            background: #f0f0f0;
+            align-items: center;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 20px;
+            margin-right: 10px;
+            font-size: 15px;
+        }
+
+        .send-button {
+            background: #03773f;
+            color: white;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .send-button:hover {
+            background: rgba(3, 119, 63, 0.8);
+        }
+
+        .no-messages {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 8px;
+            margin: 20px;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <button class="back-button" onclick="window.location.href='/groups'">&larr;</button>
+            <div class="group-info">
+                <h2 class="group-name">Cargando...</h2>
+                <p class="participant-count">Cargando participantes...</p>
+            </div>
+        </div>
+
+        <div class="messages-container" id="messages">
+            <div class="loading">Cargando mensajes...</div>
+        </div>
+
+        <div class="input-container">
+            <input type="text" class="message-input" placeholder="Escribe un mensaje..." id="messageInput">
+            <button class="send-button" onclick="sendMessage()">→</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const urlParams = new URLSearchParams(window.location.search);
+        const groupId = urlParams.get('groupId');
+        let groupInfo = null;
+
+        async function loadGroupInfo() {
+            try {
+                const response = await fetch('/api/groups/list-groups');
+                const data = await response.json();
+                if (data.status && data.grupos) {
+                    groupInfo = data.grupos.find(g => g.id === groupId);
+                    if (groupInfo) {
+                        document.querySelector('.group-name').textContent = groupInfo.nombre;
+                        document.querySelector('.participant-count').textContent = 
+                            `${groupInfo.participantes} participantes`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error cargando información del grupo:', error);
+            }
+        }
+
+        async function loadMessages() {
+            try {
+                const response = await fetch(`/api/groups/get-messages?groupId=${groupId}`);
+                const data = await response.json();
+                
+                const messagesContainer = document.getElementById('messages');
+                if (!data.messages || data.messages.length === 0) {
+                    messagesContainer.innerHTML = `
+                        <div class="no-messages">
+                            <h3>No hay mensajes nuevos</h3>
+                            <p>Los mensajes aparecerán aquí</p>
+                        </div>`;
+                    return;
+                }
+
+                messagesContainer.innerHTML = data.messages
+                    .map(msg => createMessageHTML(msg))
+                    .join('');
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            } catch (error) {
+                console.error('Error cargando mensajes:', error);
+            }
+        }
+
+        function createMessageHTML(message) {
+            const isReceived = message.sender_jid !== 'TU_ID'; // Ajusta esto según tu lógica
+            const messageClass = isReceived ? 'received' : 'sent';
+            const date = new Date(message.timestamp * 1000);
+            const timeString = date.toLocaleTimeString('es-ES', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+
+            return `
+                <div class="message ${messageClass}">
+                    <div class="message-info">
+                        <span class="sender">${isReceived ? message.sender_name || 'Usuario' : 'Tú'}</span>
+                        <span class="timestamp">${timeString}</span>
+                    </div>
+                    <div class="message-content">
+                        ${message.content}
+                    </div>
+                </div>`;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+
+            try {
+                const response = await fetch('/api/groups/send-message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        groupId: groupId,
+                        message: message
+                    })
+                });
+
+                const data = await response.json();
+                if (data.status) {
+                    input.value = '';
+                    loadMessages(); // Recargar mensajes después de enviar
+                }
+            } catch (error) {
+                console.error('Error enviando mensaje:', error);
+                alert('Error al enviar el mensaje');
+            }
+        }
+
+        // Manejar la tecla Enter para enviar mensajes
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Configurar Socket.IO para mensajes en tiempo real
+        socket.on('new_message', (message) => {
+            if (message.groupId === groupId) {
+                const messagesContainer = document.getElementById('messages');
+                messagesContainer.innerHTML += createMessageHTML(message);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        });
+
+        // Inicializar la página
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!groupId) {
+                window.location.href = '/groups';
+                return;
+            }
+            
+            loadGroupInfo();
+            loadMessages();
+
+            // Recargar mensajes periódicamente
+            setInterval(loadMessages, 10000); // Cada 10 segundos
+        });
+    </script>
+</body>
+</html>

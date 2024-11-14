@@ -18,7 +18,47 @@ module.exports = function (sock, store, handler) {
     throw new Error("Handler es requerido");
   }
 
-  // Ya no creamos una nueva instancia del handler aquí
+  // Ruta para servir la página de chat
+  router.get("/chat", (req, res) => {
+    res.sendFile("chat.html", { root: "./client" });
+  });
+
+  // Obtener mensajes de un grupo
+  router.get("/get-messages", async (req, res) => {
+    try {
+      const groupId = req.query.groupId;
+      const days = parseInt(req.query.days) || 7; // Por defecto 7 días
+
+      const messages = await handler.db.getGroupMessages(groupId, days);
+      res.json({ status: true, messages });
+    } catch (error) {
+      console.error("Error obteniendo mensajes:", error);
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
+
+  // Enviar mensaje a un grupo
+  router.post("/send-message", async (req, res) => {
+    try {
+      const { groupId, message } = req.body;
+
+      if (!groupId || !message) {
+        throw new Error("GroupId y mensaje son requeridos");
+      }
+
+      const result = await sock.sendMessage(groupId, { text: message });
+      res.json({ status: true, result });
+    } catch (error) {
+      console.error("Error enviando mensaje:", error);
+      res.status(500).json({
+        status: false,
+        error: error.message,
+      });
+    }
+  });
 
   router.get("/list-groups", async (req, res) => {
     try {
