@@ -6,19 +6,18 @@ const axios = require("axios");
 const path = require("path");
 
 class WhatsAppGroupHandler {
-  constructor(sock, store) {
+  constructor(sock) {
     if (!sock) {
       throw new Error("Socket es requerido");
     }
 
     this.sock = sock;
-    this.store = store;
     this.db = new DatabaseHandler();
     this.setupMessageListener();
     this.isConnected = false;
     this.connectionRetries = 0;
     this.maxRetries = 3;
-    this.retryDelay = 60000; 
+    this.retryDelay = 60000;
   }
 
   async init() {

@@ -4,7 +4,7 @@ const fs = require("fs");
 const axios = require("axios");
 const FormData = require("form-data");
 
-module.exports = function (sock, store, handler) {
+module.exports = function (sock, handler) {
   console.log("Inicializando rutas con socket y handler:", !!sock, !!handler);
 
   if (!sock) {

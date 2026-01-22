@@ -2,7 +2,6 @@ const {
   default: makeWASocket,
   DisconnectReason,
   useMultiFileAuthState,
-  makeInMemoryStore,
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
@@ -61,32 +60,49 @@ app.get("/", (req, res) => {
 let sock;
 let qrDinamic;
 let soket;
-
-// Crear el almacén en memoria
-const store = makeInMemoryStore({});
-store.readFromFile("./baileys_store.json");
-setInterval(() => {
-  store.writeToFile("./baileys_store.json");
-}, 10_000);
+let isFirstConnection = true;
 
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState("session_auth_info");
 
   sock = makeWASocket({
-    printQRInTerminal: true,
     auth: state,
     logger: log({ level: "silent" }),
   });
-
-  store.bind(sock.ev);
 
   console.log("Socket creado:", !!sock);
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    console.log("Update recibido:", { connection, qr: !!qr });
     qrDinamic = qr;
+    if (qr) {
+      console.log("QR generado, emitiendo a cliente");
+      updateQR("qr");
+    }
     if (connection === "close") {
+      console.log("Conexión cerrada.");
+      console.log("lastDisconnect completo:", JSON.stringify(lastDisconnect, null, 2));
+
+      if (!lastDisconnect?.error) {
+        console.log("Conexión cerrada sin error");
+        return;
+      }
+
+      // Mostrar el error completo
+      console.log("Error completo:", lastDisconnect.error);
+      console.log("Error data:", lastDisconnect.error.data);
+
       let reason = new Boom(lastDisconnect.error).output.statusCode;
+      console.log("Razón de desconexión (statusCode):", reason);
+
+      // No hacer nada si es la primera conexión y aún no se ha autenticado
+      // Esto evita el loop de reconexión que interrumpe la generación del QR
+      if (isFirstConnection && !sock?.user) {
+        console.log("Primera conexión cerrada, esperando autenticación o QR...");
+        return;
+      }
+
       if (reason === DisconnectReason.badSession) {
         console.log(
           `Bad Session File, Please Delete ${session} and Scan Again`
@@ -115,22 +131,21 @@ async function connectToWhatsApp() {
         console.log("Se agotó el tiempo de conexión, conectando...");
         await connectToWhatsApp();
       } else {
-        sock.end(
-          `Motivo de desconexión desconocido: ${reason}|${lastDisconnect.error}`
-        );
+        console.log(`Motivo de desconexión: ${reason}`);
       }
     } else if (connection === "open") {
       console.log("Conexión abierta");
+      isFirstConnection = false;
 
       try {
         const WhatsAppGroupHandler = require("./src/groupHandlers");
         // Crear una nueva instancia
-        const handler = new WhatsAppGroupHandler(sock, store);
+        const handler = new WhatsAppGroupHandler(sock);
         // Inicializar la conexión a la BD
         await handler.init();
 
         // Configurar las rutas con el handler inicializado
-        const groupRouter = require("./src/groupRoutes")(sock, store, handler);
+        const groupRouter = require("./src/groupRoutes")(sock, handler);
         app.use("/api/groups", groupRouter);
         console.log(
           "Router de grupos y base de datos configurados correctamente"
@@ -205,7 +220,9 @@ app.get("/send-message", async (req, res) => {
 });
 
 io.on("connection", async (socket) => {
+  console.log("Cliente conectado a socket.io");
   soket = socket;
+  console.log("isConnected:", isConnected(), "qrDinamic:", !!qrDinamic);
   if (isConnected()) {
     updateQR("connected");
   } else if (qrDinamic) {
@@ -221,11 +238,26 @@ io.on("connection", async (socket) => {
 });
 
 const updateQR = (data) => {
+  console.log("updateQR llamado con:", data, "soket conectado:", !!soket);
   switch (data) {
     case "qr":
+      if (!qrDinamic) {
+        console.log("No hay QR dinámico disponible");
+        return;
+      }
       qrcode.toDataURL(qrDinamic, (err, url) => {
-        soket?.emit("qr", url);
-        soket?.emit("log", "QR recibido , scan");
+        if (err) {
+          console.error("Error generando QR URL:", err);
+          return;
+        }
+        console.log("QR convertido a URL exitosamente, emitiendo...");
+        if (soket) {
+          soket.emit("qr", url);
+          soket.emit("log", "QR recibido , scan");
+          console.log("QR emitido al cliente");
+        } else {
+          console.log("No hay cliente conectado para emitir el QR");
+        }
       });
       break;
     case "connected":
